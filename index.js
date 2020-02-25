@@ -1,19 +1,25 @@
 const httpServer = require('http').createServer();
 const base64 = require('crypto-js/enc-base64');
 const sha1 = require('crypto-js/sha1');
-httpServer.listen(3002, ()=>console.log(`HTTP server started`))
+httpServer.listen(3000, ()=>console.log(`HTTP server started`))
 
 function createFrame(message){
-    //Allocate 2 bytes for FIN, RSV1, RSV2, RSV3, OPCODE and payload length
-    //Also, allocate some amount of bytes for the message
-    const buffer = Buffer.alloc(2+Buffer.byteLength(message));
-    //Write the first byte to set FIN, RSV1, RSV2, RSV3 and OPCODE
-    buffer.writeUInt8(0b10000001, 0);
-    //Write byte length of the message to the second byte
-    buffer.writeUInt8(Buffer.byteLength(message, 'utf8'), 1);
-    //Write the message byte sequence to the other bytes 
-    buffer.write(message, 2);
-    return buffer;
+    let messageBuffer = Buffer.from(message, 'utf8');
+    let messageBufferLength = messageBuffer.length;
+    if(messageBufferLength<126){
+        //Allocate 2 bytes for FIN, RSV1, RSV2, RSV3, OPCODE and payload length
+        //Also, allocate some amount of bytes for the message
+        const buffer = Buffer.alloc(2+messageBufferLength);
+        //Write the first byte to set FIN, RSV1, RSV2, RSV3 and OPCODE
+        buffer.writeUInt8(0b10000001, 0);
+        //Write byte length of the message to the second byte
+        buffer.writeUInt8(messageBufferLength, 1);
+        //Write the message byte sequence to the other bytes 
+        buffer.write(message, 2);
+        return buffer;
+    }else{
+        throw new Error("Message length should be less than 128");
+    }
 }
 
 function readFrame(data){
@@ -52,10 +58,9 @@ function readFrame(data){
             let resultBuffer = Buffer.alloc(payloadLength);
             let maskingKey = data.slice(2+extendedPayloadIndex, 6+extendedPayloadIndex);
             let payloadData = data.slice(6+extendedPayloadIndex, 6+payloadLength+extendedPayloadIndex)
-    
-            for(let i = 0, j = 0; i<payloadData.length; i++){  
-                resultBuffer.writeUInt8(payloadData.readUInt8(i)^maskingKey.readUInt8(j), i); 
-                j = j>2?0:++j;
+
+            for(let i = 0; i<payloadData.length; i++){  
+                resultBuffer.writeUInt8(payloadData.readUInt8(i)^maskingKey.readUInt8(i%4), i);
             }
 
             return resultBuffer.toString('utf8');
@@ -87,7 +92,11 @@ httpServer.on('upgrade', (req, socket, head)=>{
 
     socket.on('data', function(data){
         let framePayload = readFrame(data); 
-        socket.write(createFrame(`The server received frame payload, it is equeal to: ${framePayload}`));
+        try{
+            socket.write(createFrame(`The server received frame payload, it is equeal to: ${framePayload}`));
+        }catch(e){
+            console.log(e);
+        }
         console.log(`The following message was received: ${framePayload}`);
     });
 
